@@ -36,7 +36,7 @@ async function initDb() {
   if (!pool) return
   await pool.query(`CREATE TABLE IF NOT EXISTS help_orders (
     id VARCHAR(40) PRIMARY KEY,
-    status VARCHAR(20) NOT NULL DEFAULT 'waiting',
+    `status` VARCHAR(20) NOT NULL DEFAULT 'waiting',
     content TEXT,
     station VARCHAR(100) DEFAULT '',
     user_name VARCHAR(100) DEFAULT '',
@@ -45,12 +45,12 @@ async function initDb() {
     assignee VARCHAR(100) DEFAULT '',
     created_at DATETIME NOT NULL,
     updated_at DATETIME NOT NULL,
-    INDEX idx_status(status), INDEX idx_created(created_at)
+    INDEX idx_status(`status`), INDEX idx_created(created_at)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`)
   await pool.query(`CREATE TABLE IF NOT EXISTS help_logs (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     order_id VARCHAR(40) NOT NULL,
-    action VARCHAR(30) NOT NULL,
+    `action` VARCHAR(30) NOT NULL,
     operator VARCHAR(100) DEFAULT '',
     details TEXT,
     created_at DATETIME NOT NULL,
@@ -75,7 +75,7 @@ async function findOrder(orderId) {
 async function log(orderId, action, operator, details = '') {
   const item = { orderId, action, operator, details, createdAt: now() }
   if (!pool) return memoryLogs.push(item)
-  await pool.query('INSERT INTO help_logs(order_id,action,operator,details,created_at) VALUES(?,?,?,?,?)', [orderId, action, operator, JSON.stringify(details), now()])
+  await pool.query('INSERT INTO help_logs(order_id,`action`,operator,details,created_at) VALUES(?,?,?,?,?)', [orderId, action, operator, JSON.stringify(details), now()])
 }
 
 app.get('/health', (req, res) => res.json({ ok: true, service: 'blind-help-backend', time: now().toISOString(), database: Boolean(pool) }))
