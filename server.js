@@ -44,9 +44,9 @@ const memoryLogs = []
 
 async function initDb() {
   if (!pool) return
-  await pool.query(`CREATE TABLE IF NOT EXISTS help_orders (
+  await pool.query(\`CREATE TABLE IF NOT EXISTS help_orders (
     id VARCHAR(40) PRIMARY KEY,
-    status VARCHAR(20) NOT NULL DEFAULT 'waiting',
+    \`status\` VARCHAR(20) NOT NULL DEFAULT 'waiting',
     content TEXT,
     station VARCHAR(100) DEFAULT '',
     user_name VARCHAR(100) DEFAULT '',
@@ -55,17 +55,17 @@ async function initDb() {
     assignee VARCHAR(100) DEFAULT '',
     created_at DATETIME NOT NULL,
     updated_at DATETIME NOT NULL,
-    INDEX idx_status(status), INDEX idx_created(created_at)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`)
-  await pool.query(`CREATE TABLE IF NOT EXISTS help_logs (
+    INDEX idx_status(\`status\`), INDEX idx_created(created_at)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4\`)
+  await pool.query(\`CREATE TABLE IF NOT EXISTS help_logs (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     order_id VARCHAR(40) NOT NULL,
-    action VARCHAR(30) NOT NULL,
+    \`action\` VARCHAR(30) NOT NULL,
     operator VARCHAR(100) DEFAULT '',
     details TEXT,
     created_at DATETIME NOT NULL,
     INDEX idx_order(order_id)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4\`)
 }
 
 function toOrder(row) {
