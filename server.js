@@ -9,19 +9,9 @@ const app = express()
 const PORT = Number(process.env.PORT || 8080)
 const APPID = process.env.WX_APPID || 'wx504c106474975d60'
 const WX_SECRET = process.env.WX_SECRET || ''
-// 解析 MYSQL_ADDRESS，支持 "IP:PORT" 或纯 "IP" 格式
-const parseDbAddress = (addr) => {
-  if (!addr) return null
-  const parts = addr.split(':')
-  return {
-    host: parts[0],
-    port: Number(parts[1]) || Number(process.env.MYSQL_PORT) || 3306
-  }
-}
-const dbAddr = parseDbAddress(process.env.MYSQL_ADDRESS)
-const pool = dbAddr ? mysql.createPool({
-  host: dbAddr.host,
-  port: dbAddr.port,
+const pool = process.env.MYSQL_ADDRESS ? mysql.createPool({
+  host: process.env.MYSQL_ADDRESS,
+  port: Number(process.env.MYSQL_PORT || 3306),
   user: process.env.MYSQL_USERNAME || 'root',
   password: process.env.MYSQL_PASSWORD || '',
   database: process.env.MYSQL_DATABASE || 'blind_help',
@@ -44,9 +34,9 @@ const memoryLogs = []
 
 async function initDb() {
   if (!pool) return
-  await pool.query(\`CREATE TABLE IF NOT EXISTS help_orders (
+  await pool.query(`CREATE TABLE IF NOT EXISTS help_orders (
     id VARCHAR(40) PRIMARY KEY,
-    \`status\` VARCHAR(20) NOT NULL DEFAULT 'waiting',
+    status VARCHAR(20) NOT NULL DEFAULT 'waiting',
     content TEXT,
     station VARCHAR(100) DEFAULT '',
     user_name VARCHAR(100) DEFAULT '',
@@ -55,17 +45,17 @@ async function initDb() {
     assignee VARCHAR(100) DEFAULT '',
     created_at DATETIME NOT NULL,
     updated_at DATETIME NOT NULL,
-    INDEX idx_status(\`status\`), INDEX idx_created(created_at)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4\`)
-  await pool.query(\`CREATE TABLE IF NOT EXISTS help_logs (
+    INDEX idx_status(status), INDEX idx_created(created_at)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`)
+  await pool.query(`CREATE TABLE IF NOT EXISTS help_logs (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     order_id VARCHAR(40) NOT NULL,
-    \`action\` VARCHAR(30) NOT NULL,
+    action VARCHAR(30) NOT NULL,
     operator VARCHAR(100) DEFAULT '',
     details TEXT,
     created_at DATETIME NOT NULL,
     INDEX idx_order(order_id)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4\`)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`)
 }
 
 function toOrder(row) {
@@ -157,4 +147,15 @@ app.post('/auth/wx-login', async (req, res) => {
   } catch (e) { res.status(502).json({ success: false, error: '微信登录接口不可用' }) }
 })
 
-initDb().then(() => app.listen(PORT, () => console.log(`blind-help-backend listening on ${PORT}`))).catch(err => { console.error('DB init failed', err); process.exit(1) })
+// Start server immediately, init DB in background
+app.listen(PORT, () => console.log(`blind-help-backend listening on ${PORT}`))
+
+initDb().then(() => {
+  console.log('Database initialized successfully')
+}).catch(err => {
+  console.error('DB init failed, will retry:', err.message)
+  // Retry DB init every 30 seconds
+  setInterval(() => {
+    initDb().then(() => console.log('Database initialized on retry')).catch(e => console.error('DB retry failed:', e.message))
+  }, 30000)
+})
