@@ -9,9 +9,19 @@ const app = express()
 const PORT = Number(process.env.PORT || 8080)
 const APPID = process.env.WX_APPID || 'wx504c106474975d60'
 const WX_SECRET = process.env.WX_SECRET || ''
-const pool = process.env.MYSQL_ADDRESS ? mysql.createPool({
-  host: process.env.MYSQL_ADDRESS,
-  port: Number(process.env.MYSQL_PORT || 3306),
+// 解析 MYSQL_ADDRESS，支持 "IP:PORT" 或纯 "IP" 格式
+const parseDbAddress = (addr) => {
+  if (!addr) return null
+  const parts = addr.split(':')
+  return {
+    host: parts[0],
+    port: Number(parts[1]) || Number(process.env.MYSQL_PORT) || 3306
+  }
+}
+const dbAddr = parseDbAddress(process.env.MYSQL_ADDRESS)
+const pool = dbAddr ? mysql.createPool({
+  host: dbAddr.host,
+  port: dbAddr.port,
   user: process.env.MYSQL_USERNAME || 'root',
   password: process.env.MYSQL_PASSWORD || '',
   database: process.env.MYSQL_DATABASE || 'blind_help',
