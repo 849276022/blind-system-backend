@@ -35,6 +35,9 @@ const id = () => `HELP${Date.now().toString().slice(-8)}${crypto.randomBytes(2).
 const memoryOrders = []
 const memoryLogs = []
 
+// 生成合法的 cuid（模拟 MAC 地址格式）
+const CUID = crypto.randomBytes(6).toString('hex').toUpperCase()
+
 // 百度语音识别
 let baiduToken = null
 let baiduTokenExpire = 0
@@ -44,37 +47,34 @@ async function getBaiduToken() {
   const url = `https://aip.baidubce.com/oauth/2.0/token?grant_type=client_credentials&client_id=${BAIDU_API_KEY}&client_secret=${BAIDU_SECRET_KEY}`
   const res = await fetch(url, { method: 'POST' })
   const data = await res.json()
-  if (data.error) throw new Error(`百度Token获取失败: ${data.error_description}`)
+  if (data.error) throw new Error(`百度 Token 获取失败：${data.error_description}`)
   baiduToken = data.access_token
   baiduTokenExpire = Date.now() + (data.expires_in - 300) * 1000
-  console.log('百度Token获取成功，有效期:', data.expires_in, '秒')
+  console.log('百度 Token 获取成功，有效期:', data.expires_in, '秒')
   return baiduToken
 }
 
-async function recognizeAudio(audioBuffer, format = 'mp3') {
+async function recognizeAudio(audioBuffer, format = 'pcm') {
   try {
     const token = await getBaiduToken()
-    const url = `https://vop.baidu.com/server_api?access_token=${token}`
-    const body = {
-      format: format,
-      rate: 16000,
-      channel: 1,
-      cuid: 'blind-help-backend',
-      dev_pid: 1537,
-      speech: audioBuffer.toString('base64'),
-      len: audioBuffer.length
-    }
+    // 百度 ASR 正确调用方式：cuid+token+dev_pid 放 URL 参数，直接发原始音频数据
+    const params = new URLSearchParams({ cuid: CUID, token, dev_pid: '1537' })
+    const url = 'https://vop.baidu.com/server_api?' + params.toString()
+
     const res = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
+      headers: {
+        'Content-Type': 'audio/pcm; rate=16000',
+        'Content-Length': String(audioBuffer.length)
+      },
+      body: audioBuffer
     })
     const data = await res.json()
     console.log('百度语音识别返回:', JSON.stringify(data))
     if (data.err_no === 0 && data.result && data.result.length > 0) {
       return data.result[0]
     }
-    console.warn('语音识别无结果, err_no:', data.err_no, 'err_msg:', data.err_msg)
+    console.warn('语音识别无结果，err_no:', data.err_no, 'err_msg:', data.err_msg)
     return null
   } catch (e) {
     console.error('语音识别异常:', e.message)
@@ -110,34 +110,64 @@ async function initDb() {
 
 function toOrder(row) {
   if (!row) return row
-  return { id: row.id, status: row.status, content: row.content || '', station: row.station || '', userName: row.user_name || row.userName || '', openid: row.openid || '', audioUrl: row.audio_url || row.audioUrl || '', assignee: row.assignee || '', createdAt: row.created_at || row.createdAt, updatedAt: row.updated_at || row.updatedAt }
+  return {
+    id: row.id,
+    status: row.status,
+    content: row.content || '',
+    station: row.station || '',
+    userName: row.user_name || row.userName || '',
+    openid: row.openid || '',
+    audioUrl: row.audio_url || row.audioUrl || '',
+    assignee: row.assignee || '',
+    createdAt: row.created_at || row.createdAt,
+    updatedAt: row.updated_at || row.updatedAt
+  }
 }
+
 async function listOrders() {
-  if (!pool) return memoryOrders.map(toOrder).sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt))
+  if (!pool) return memoryOrders.map(toOrder).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
   const [rows] = await pool.query('SELECT * FROM help_orders ORDER BY created_at DESC LIMIT 500')
   return rows.map(toOrder)
 }
+
 async function findOrder(orderId) {
   if (!pool) return memoryOrders.find(x => x.id === orderId)
   const [rows] = await pool.query('SELECT * FROM help_orders WHERE id=? LIMIT 1', [orderId])
   return rows[0]
 }
+
 async function log(orderId, action, operator, details = '') {
   const item = { orderId, action, operator, details, createdAt: now() }
   if (!pool) return memoryLogs.push(item)
-  await pool.query('INSERT INTO help_logs(order_id,action,operator,details,created_at) VALUES(?,?,?,?,?)', [orderId, action, operator, JSON.stringify(details), now()])
+  await pool.query('INSERT INTO help_logs(order_id, action, operator, details, created_at) VALUES(?,?,?,?,?)',
+    [orderId, action, operator, JSON.stringify(details), now()])
 }
 
 app.get('/health', (req, res) => res.json({ ok: true, service: 'blind-help-backend', time: now().toISOString(), database: Boolean(pool) }))
-app.get('/', (req, res) => res.json({ name: 'blind-help-backend', endpoints: ['GET /help-orders', 'POST /help-orders', 'PUT /help-orders/:id/status', 'POST /help-orders/:id/audio'] }))
+app.get('/', (req, res) => res.json({
+  name: 'blind-help-backend',
+  endpoints: ['GET /help-orders', 'POST /help-orders', 'PUT /help-orders/:id/status', 'POST /help-orders/:id/audio']
+}))
 
 app.get('/help-orders', async (req, res) => {
-  try { res.json({ success: true, data: await listOrders() }) } catch (e) { console.error(e); res.status(500).json({ success: false, error: '读取工单失败' }) }
+  try { res.json({ success: true, data: await listOrders() }) }
+  catch (e) { console.error(e); res.status(500).json({ success: false, error: '读取工单失败' }) }
 })
 
 app.post('/help-orders', async (req, res) => {
   const body = req.body || {}
-  const order = { id: body.id || id(), status: 'waiting', content: body.content || '语音求助（待识别）', station: body.station || '', user_name: body.userName || '', openid: body.openid || '', audio_url: body.audioUrl || '', assignee: '', created_at: now(), updated_at: now() }
+  const order = {
+    id: body.id || id(),
+    status: 'waiting',
+    content: body.content || '语音求助（待识别）',
+    station: body.station || '',
+    user_name: body.userName || '',
+    openid: body.openid || '',
+    audio_url: body.audioUrl || '',
+    assignee: '',
+    created_at: now(),
+    updated_at: now()
+  }
   try {
     if (pool) await pool.query('INSERT INTO help_orders SET ?', order)
     else memoryOrders.unshift(order)
@@ -154,8 +184,14 @@ app.put('/help-orders/:id/status', async (req, res) => {
     const existing = await findOrder(req.params.id)
     if (!existing) return res.status(404).json({ success: false, error: '工单不存在' })
     const operator = req.body.operator || '调度员'
-    if (pool) await pool.query('UPDATE help_orders SET status=?, assignee=?, updated_at=? WHERE id=?', [next, next === 'assigned' ? operator : (existing.assignee || ''), now(), req.params.id])
-    else { existing.status = next; existing.assignee = next === 'assigned' ? operator : existing.assignee; existing.updated_at = now() }
+    if (pool) {
+      await pool.query('UPDATE help_orders SET status=?, assignee=?, updated_at=? WHERE id=?',
+        [next, next === 'assigned' ? operator : (existing.assignee || ''), now(), req.params.id])
+    } else {
+      existing.status = next
+      existing.assignee = next === 'assigned' ? operator : existing.assignee
+      existing.updated_at = now()
+    }
     await log(req.params.id, `status_${next}`, operator, req.body)
     res.json({ success: true, data: toOrder(await findOrder(req.params.id)) })
   } catch (e) { console.error(e); res.status(500).json({ success: false, error: '更新工单失败' }) }
@@ -172,14 +208,20 @@ app.post('/help-orders/:id/audio', upload.single('audio'), async (req, res) => {
 
     // 上传到 COS（如果配置了）
     if (cos) {
-      const Key = `help-orders/${req.params.id}/${Date.now()}-${req.file.originalname || 'audio.mp3'}`
-      const result = await cos.putObject({ Bucket: process.env.COS_BUCKET, Region: process.env.COS_REGION, Key, Body: req.file.buffer, ContentType: req.file.mimetype || 'audio/mpeg' })
+      const Key = `help-orders/${req.params.id}/${Date.now()}-${req.file.originalname || 'audio.pcm'}`
+      const result = await cos.putObject({
+        Bucket: process.env.COS_BUCKET,
+        Region: process.env.COS_REGION,
+        Key,
+        Body: req.file.buffer,
+        ContentType: req.file.mimetype || 'audio/pcm'
+      })
       audioUrl = `https://${result.Location}`
     }
 
-    // 调用百度语音识别
+    // 调用百度语音识别（直接识别 PCM，不需要 ffmpeg）
     try {
-      recognizedText = await recognizeAudio(req.file.buffer, 'mp3')
+      recognizedText = await recognizeAudio(req.file.buffer, 'pcm')
       console.log('语音识别结果:', recognizedText)
     } catch (e) {
       console.error('语音识别失败:', e.message)
@@ -189,9 +231,11 @@ app.post('/help-orders/:id/audio', upload.single('audio'), async (req, res) => {
     const newContent = recognizedText || existing.content
     if (pool) {
       if (audioUrl) {
-        await pool.query('UPDATE help_orders SET audio_url=?, content=?, updated_at=? WHERE id=?', [audioUrl, newContent, now(), req.params.id])
+        await pool.query('UPDATE help_orders SET audio_url=?, content=?, updated_at=? WHERE id=?',
+          [audioUrl, newContent, now(), req.params.id])
       } else if (recognizedText) {
-        await pool.query('UPDATE help_orders SET content=?, updated_at=? WHERE id=?', [recognizedText, now(), req.params.id])
+        await pool.query('UPDATE help_orders SET content=?, updated_at=? WHERE id=?',
+          [recognizedText, now(), req.params.id])
       }
     } else {
       if (audioUrl) existing.audio_url = audioUrl
@@ -235,6 +279,7 @@ initDb().then(() => {
 }).catch(err => {
   console.error('DB init failed, will retry:', err.message)
   setInterval(() => {
-    initDb().then(() => console.log('Database initialized on retry')).catch(e => console.error('DB retry failed:', e.message))
+    initDb().then(() => console.log('Database initialized on retry'))
+      .catch(e => console.error('DB retry failed:', e.message))
   }, 30000)
 })
